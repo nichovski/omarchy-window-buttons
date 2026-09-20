@@ -216,9 +216,6 @@ Item {
     return null
   }
 
-  // Number of overlays mid-drag; the geometry poll stands down while non-zero.
-  property int movingCount: 0
-
   function screenForMonitor(monitor) {
     if (!monitor || !monitor.name) return null
     var screens = Quickshell.screens
@@ -232,9 +229,17 @@ Item {
   // events, but Hyprland has no discrete "resize finished" event to key a
   // refresh off of, so a light poll keeps the row glued to its window through
   // an edge-drag resize. This is an IPC round-trip, not a subprocess spawn.
+  // Deliberately keeps running through a drag. An earlier version stood this
+  // down via a shared counter, but a delegate destroyed mid-drag (which a
+  // cross-monitor move can cause) never ran its decrement, so the counter
+  // stuck above zero and the poll never resumed. lastIpcObject only updates
+  // from this refresh, so every overlay then froze at stale coordinates —
+  // which looked like the buttons vanishing after dragging to another
+  // monitor. The poll cannot disturb a drag anyway: margins are frozen for
+  // its duration.
   Timer {
     interval: 400
-    running: service.movingCount === 0
+    running: true
     repeat: true
     triggeredOnStart: true
     onTriggered: Hyprland.refreshToplevels()
@@ -266,6 +271,8 @@ Item {
         && targetScreen !== null)
       readonly property bool isActiveWindow: modelData !== null && Hyprland.activeToplevel !== null
         && Hyprland.activeToplevel.address === modelData.address
+
+
 
       // Pressing a button and dragging off before releasing leaves
       // HoverHandler.hovered stuck at its pre-drag value — Qt only
@@ -351,7 +358,6 @@ Item {
         lastTy = 0
         originReady = false
         settlePass = 0
-        service.movingCount += 1
         // Both of these change geometry asynchronously, so the origin is read
         // after a settle rather than from the stale rect. afterSettle() also
         // re-checks floating, which covers a fullscreen window that drops back
@@ -393,7 +399,6 @@ Item {
         moving = false
         originReady = false
         settleTimer.stop()
-        service.movingCount = Math.max(0, service.movingCount - 1)
         if (pendingDirty) moveTick.flush()
       }
 
@@ -434,6 +439,16 @@ Item {
           service.moveWindowTo(addr, cornerWindow.pendingX, cornerWindow.pendingY)
         }
         onTriggered: flush()
+      }
+
+      // Safety net for the state that hides the row entirely. `moving` drives
+      // the row's opacity, so if a drag ever ends without onActiveChanged
+      // firing, the buttons would stay invisible for that window forever.
+      Timer {
+        interval: 500
+        repeat: true
+        running: cornerWindow.moving
+        onTriggered: if (!moveDrag.active) cornerWindow.endMove()
       }
 
       HoverHandler {

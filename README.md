@@ -115,6 +115,15 @@ Two cases the compositor will not do on its own:
   viewport — visible nowhere. Crossing an output boundary therefore dispatches
   `monitor = "<name>"` once, which reassigns the workspace too.
 
+The geometry poll deliberately keeps running through a drag. An earlier
+version stood it down via a counter shared across overlays, but a delegate
+destroyed mid-drag — which a cross-monitor move can cause — never ran its
+decrement, so the counter stuck above zero and the poll never resumed.
+`lastIpcObject` only updates from that refresh, so every overlay then froze at
+stale coordinates, which looked like the buttons disappearing after dragging
+to another monitor. The poll cannot disturb a drag anyway, because margins are
+frozen for its duration.
+
 The overlay's `screen` is pinned for the duration of a drag. A layer surface
 belongs to a single output, so letting it follow the window across monitors
 would destroy and recreate the surface mid-drag and drop the pointer grab.
