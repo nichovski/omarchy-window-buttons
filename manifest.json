@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "nichovski.window-buttons",
+  "name": "Window Buttons",
+  "version": "1.0.0",
+  "author": "nichovski",
+  "license": "MIT",
+  "description": "Windows-style minimize / move / close buttons in each window's top-right corner. Hover the corner to reveal them.",
+  "kinds": ["service"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
