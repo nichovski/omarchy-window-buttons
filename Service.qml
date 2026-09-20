@@ -189,6 +189,36 @@ Item {
     Hyprland.dispatch('hl.dsp.window.move({ window = "address:' + a + '", x = ' + Math.round(x) + ', y = ' + Math.round(y) + ' })')
   }
 
+  // A fullscreen window ignores pixel moves outright, so a drag has to leave
+  // fullscreen first — the same thing dragging a maximized window does on
+  // Windows.
+  function exitFullscreen(addr) {
+    var a = service.normalizedAddress(addr)
+    if (!a) return
+    Hyprland.dispatch('hl.dsp.window.fullscreen({ window = "address:' + a + '" })')
+  }
+
+  // Crossing outputs needs an explicit handoff. A bare pixel move into another
+  // monitor's area leaves the window on its old monitor's workspace, drawn
+  // outside that monitor's viewport, i.e. invisible.
+  function setWindowMonitor(addr, name) {
+    var a = service.normalizedAddress(addr)
+    if (!a || !name) return
+    Hyprland.dispatch('hl.dsp.window.move({ window = "address:' + a + '", monitor = "' + name + '" })')
+  }
+
+  function screenAt(x, y) {
+    var ss = Quickshell.screens
+    for (var i = 0; i < ss.length; i++) {
+      var sc = ss[i]
+      if (x >= sc.x && x < sc.x + sc.width && y >= sc.y && y < sc.y + sc.height) return sc
+    }
+    return null
+  }
+
+  // Number of overlays mid-drag; the geometry poll stands down while non-zero.
+  property int movingCount: 0
+
   function screenForMonitor(monitor) {
     if (!monitor || !monitor.name) return null
     var screens = Quickshell.screens
@@ -204,7 +234,7 @@ Item {
   // an edge-drag resize. This is an IPC round-trip, not a subprocess spawn.
   Timer {
     interval: 400
-    running: true
+    running: service.movingCount === 0
     repeat: true
     triggeredOnStart: true
     onTriggered: Hyprland.refreshToplevels()
@@ -254,8 +284,18 @@ Item {
       property bool moving: false
       property int frozenLeft: 0
       property int frozenTop: 0
+      property var frozenScreen: null
+      // Name of the monitor the window was last handed to, so the handoff
+      // fires once per crossing rather than on every tick.
+      property string lastMonitorName: ""
+      // Guards the settle retries below from looping if a window refuses to
+      // float (some windows are not floatable).
+      property int settlePass: 0
 
-      screen: targetScreen
+      // Pinned for the duration of a drag: a layer surface belongs to one
+      // output, so letting this follow the window across monitors would
+      // destroy and recreate the surface mid-drag and drop the pointer grab.
+      screen: (moving && frozenScreen) ? frozenScreen : targetScreen
       visible: showable
       color: "transparent"
 
@@ -268,14 +308,13 @@ Item {
       implicitHeight: service.hitH
 
       anchors { left: true; top: true }
-      // Once the drag owns the window's position, the overlay rides the same
-      // translation instead of tracking info.at — tracking would feed each
-      // move back into the next translation and send the window skidding,
-      // while simply freezing would leave the row behind as the window slid
-      // away. Before the origin is captured the window isn't ours yet, so
-      // normal tracking still applies (and absorbs the tiled->floated jump).
-      margins.left: (moving && originReady) ? Math.round(frozenLeft + (lastTx - baseTx)) : liveLeft
-      margins.top: (moving && originReady) ? Math.round(frozenTop + (lastTy - baseTy)) : liveTop
+      // Frozen outright while dragging, and the row is hidden to match.
+      // Binding these to the live translation meant one layer-surface
+      // reconfigure per pointer event — at a 1000Hz mouse that is a thousand
+      // compositor round-trips a second, which is what made dragging crawl.
+      // The window itself still moves at 60Hz; that is the feedback.
+      margins.left: moving ? frozenLeft : liveLeft
+      margins.top: moving ? frozenTop : liveTop
 
       // --- move drag state -------------------------------------------------
       // Window position when the drag began, and the handler translation at
@@ -295,26 +334,49 @@ Item {
         originY = info.at[1]
         baseTx = lastTx
         baseTy = lastTy
-        frozenLeft = liveLeft
-        frozenTop = liveTop
+        // Seeded with the current monitor so the first tick doesn't fire a
+        // pointless handoff, which would visibly jerk the window at grab time.
+        lastMonitorName = (modelData && modelData.monitor && modelData.monitor.name)
+          ? modelData.monitor.name : ""
         originReady = true
       }
 
       function beginMove() {
         if (!modelData || !info) return
         moving = true
+        frozenScreen = targetScreen
+        frozenLeft = liveLeft
+        frozenTop = liveTop
         lastTx = 0
         lastTy = 0
         originReady = false
-        if (info.floating === false) {
-          // A tiled window has no free position, so float it first. Hyprland
-          // assigns the floated geometry asynchronously, so the origin is read
-          // once that has landed rather than from the stale tiled rect.
+        settlePass = 0
+        service.movingCount += 1
+        // Both of these change geometry asynchronously, so the origin is read
+        // after a settle rather than from the stale rect. afterSettle() also
+        // re-checks floating, which covers a fullscreen window that drops back
+        // to tiled when it exits.
+        if (info.fullscreen) {
+          service.exitFullscreen(modelData.address)
+          settleTimer.restart()
+        } else if (info.floating === false) {
+          settlePass = 1
           service.floatWindow(modelData.address)
           settleTimer.restart()
         } else {
           captureOrigin()
         }
+      }
+
+      function afterSettle() {
+        if (!moving || !modelData || !info) return
+        if (info.floating === false && settlePass < 2) {
+          settlePass += 1
+          service.floatWindow(modelData.address)
+          settleTimer.restart()
+          return
+        }
+        captureOrigin()
       }
 
       function updateMove(tx, ty) {
@@ -327,9 +389,11 @@ Item {
       }
 
       function endMove() {
+        if (!moving) return
         moving = false
         originReady = false
         settleTimer.stop()
+        service.movingCount = Math.max(0, service.movingCount - 1)
         if (pendingDirty) moveTick.flush()
       }
 
@@ -343,7 +407,7 @@ Item {
         repeat: false
         onTriggered: {
           Hyprland.refreshToplevels()
-          cornerWindow.captureOrigin()
+          cornerWindow.afterSettle()
         }
       }
 
@@ -357,7 +421,17 @@ Item {
         function flush() {
           if (!cornerWindow.pendingDirty || !cornerWindow.modelData) return
           cornerWindow.pendingDirty = false
-          service.moveWindowTo(cornerWindow.modelData.address, cornerWindow.pendingX, cornerWindow.pendingY)
+          var addr = cornerWindow.modelData.address
+          // The monitor is decided from the dragged window's top-right corner,
+          // because that is where the grabbed button (and so the pointer) is.
+          var w = (cornerWindow.info && cornerWindow.info.size && cornerWindow.info.size.length === 2)
+            ? cornerWindow.info.size[0] : 0
+          var sc = service.screenAt(cornerWindow.pendingX + w, cornerWindow.pendingY)
+          if (sc && sc.name !== cornerWindow.lastMonitorName) {
+            cornerWindow.lastMonitorName = sc.name
+            service.setWindowMonitor(addr, sc.name)
+          }
+          service.moveWindowTo(addr, cornerWindow.pendingX, cornerWindow.pendingY)
         }
         onTriggered: flush()
       }
@@ -381,8 +455,10 @@ Item {
         border.color: cornerWindow.isActiveWindow ? service.accentColor : Color.muted
         border.width: service.borderSize
 
-        opacity: ((hover.hovered && !cornerWindow.forceHidden) || cornerWindow.moving) ? 1 : 0
-        scale: (hover.hovered || cornerWindow.moving) ? 1 : 0.7
+        // Hidden while dragging: the overlay is frozen in place, so leaving it
+        // visible would strand the row where the drag began.
+        opacity: (!cornerWindow.moving && hover.hovered && !cornerWindow.forceHidden) ? 1 : 0
+        scale: (!cornerWindow.moving && hover.hovered) ? 1 : 0.7
         transformOrigin: Item.TopRight
 
         Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -426,9 +502,8 @@ Item {
             width: service.btnSize
             height: service.btnSize
             radius: 3
-            color: cornerWindow.moving
-              ? service.mixColor(service.accentColor, Color.background, 0.4)
-              : (moveHover.hovered ? service.mixColor(service.accentColor, Color.background, 0.7) : "transparent")
+            color: moveHover.hovered
+              ? service.mixColor(service.accentColor, Color.background, 0.7) : "transparent"
             Behavior on color { ColorAnimation { duration: 80 } }
 
             HoverHandler { id: moveHover; cursorShape: Qt.SizeAllCursor }

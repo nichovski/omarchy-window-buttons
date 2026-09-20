@@ -27,7 +27,7 @@ omarchy plugin remove nichovski.window-buttons
 | Button | Action |
 |--------|--------|
 | **─** Minimize | Sends the window to the `scratchpad` special workspace. Press `SUPER + S` to bring it back. |
-| **✥** Move | Press and drag. The window follows the pointer. A tiled window is floated first, since a tiled window has no free position. |
+| **✥** Move | Press and drag. The window follows the pointer, across monitors. A tiled window is floated first, and a fullscreen one leaves fullscreen, since neither has a free position. |
 | **✕** Close | Closes the window. |
 
 ## Why minimize works the way it does
@@ -96,10 +96,28 @@ hl.dsp.window.float({ window = "address:0x..", action = "toggle" })
 `close` takes `address` while the others take `window` — that asymmetry is the
 dispatchers' own.
 
-While a drag is in progress the overlay rides the drag translation instead of
-tracking the window's reported geometry. Tracking would feed each move back
-into the next translation and send the window skidding; simply freezing would
-leave the button row behind as the window slid away.
+While a drag is in progress the overlay is frozen and the button row is
+hidden, and only the window moves. An earlier version bound the overlay's
+margins to the live drag translation, which cost one layer-surface
+reconfigure per pointer event — on a 1000Hz mouse that is a thousand
+compositor round-trips a second, and dragging crawled. The window position is
+dispatched on a 16ms tick instead, and the geometry poll stands down for the
+duration of a drag.
+
+Two cases the compositor will not do on its own:
+
+- **Fullscreen.** `hl.dsp.window.move({ x, y })` is silently ignored on a
+  fullscreen window, so a drag exits fullscreen first and re-reads the
+  geometry after it settles. If the window drops back to tiled it is then
+  floated, which is why the settle runs in two passes.
+- **Crossing monitors.** A bare pixel move into another monitor's area leaves
+  the window on its old monitor's *workspace*, drawn outside that monitor's
+  viewport — visible nowhere. Crossing an output boundary therefore dispatches
+  `monitor = "<name>"` once, which reassigns the workspace too.
+
+The overlay's `screen` is pinned for the duration of a drag. A layer surface
+belongs to a single output, so letting it follow the window across monitors
+would destroy and recreate the surface mid-drag and drop the pointer grab.
 
 `hl.dsp.window.drag()` — Hyprland's own interactive move, bound to
 `SUPER + LMB` — is deliberately not used: it needs a physically held mouse
