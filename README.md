@@ -125,4 +125,5 @@ this extends.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Retains the upstream copyright notice.
+MIT — see [LICENSE](LICENSE) and [NOTICE](NOTICE). The upstream copyright
+notice is retained.
