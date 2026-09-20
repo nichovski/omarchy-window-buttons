@@ -123,6 +123,39 @@ would destroy and recreate the surface mid-drag and drop the pointer grab.
 `SUPER + LMB` — is deliberately not used: it needs a physically held mouse
 button and is a no-op when dispatched over IPC.
 
+## Developing this plugin
+
+**Editing `Service.qml` does nothing until you run `omarchy restart shell`.**
+
+Omarchy's generic plugin docs say saved changes under
+`~/.config/omarchy/plugins/` reload automatically. That is true for bar
+widgets, but not for `kind: "service"` plugins like this one. From
+`shell.qml`'s `_syncServices()`:
+
+```js
+} else {
+  // A kept instance outlives the rescan; hand it the fresh manifest.
+  var kept = _services[id]
+  ...
+  continue
+}
+```
+
+The running service instance outlives the rescan and is only handed a fresh
+manifest, so new QML is never instantiated. The `Local plugin changed,
+reloading` line in the log refers to the registry rescan, not to your service,
+which makes it look like the edit applied when it did not.
+
+Two related traps:
+
+- Heavy file churn inside the plugin directory — a `git` checkout or commit,
+  for example — can momentarily make the registry treat the plugin as removed
+  and drop the service, leaving no buttons until a restart.
+- Restarting twice in quick succession can race: the second instance prints
+  `An instance of this configuration is already running` and exits, then the
+  first exits on the IPC request, leaving nothing running and no bar. Run
+  `omarchy restart shell` once more to recover.
+
 ## Tuning
 
 Sizes are at the top of `Service.qml`: `btnSize`, `btnGap`, `rowPad`, `inset`
