@@ -88,20 +88,20 @@ Item {
     return false
   }
 
-  readonly property int btnSize: 22
-  readonly property int btnGap: 4
-  readonly property int rowPad: 5
+  readonly property int btnSize: 18
+  readonly property int btnGap: 3
+  readonly property int rowPad: 4
   readonly property int rowW: 3 * service.btnSize + 2 * service.btnGap + 2 * service.rowPad
   readonly property int rowH: service.btnSize + 2 * service.rowPad
-  // The row sits this far inside the window's top-right corner, matching how
-  // a titlebar's buttons are inset from the frame edge.
-  readonly property int inset: 6
-  // The hit box overhangs the corner so the row is still reachable when the
-  // window is flush against a screen edge, and extends left/down so the row
-  // fades in slightly before the pointer reaches it.
-  readonly property int overhang: 10
-  readonly property int hitW: service.rowW + 70
-  readonly property int hitH: service.rowH + 46
+  // The row straddles the window's top edge: half of its height rises above
+  // the edge, half sits inside the window. Its right edge lines up with the
+  // window's right edge.
+  readonly property int outside: Math.round(service.rowH / 2)
+  // Hover slop on every side of the visible row, so it fades in slightly
+  // before the pointer lands on it and stays reachable just past the corner.
+  readonly property int slop: 14
+  readonly property int hitW: service.rowW + 2 * service.slop
+  readonly property int hitH: service.rowH + 2 * service.slop
 
   // "general:border_size" is the theme's active-window border width — the
   // row's own outline is drawn at the same width for visual consistency.
@@ -281,9 +281,9 @@ Item {
       property bool forceHidden: false
 
       readonly property int liveLeft: showable
-        ? Math.round(info.at[0] + info.size[0] - targetScreen.x + service.overhang - service.hitW) : 0
+        ? Math.round(info.at[0] + info.size[0] - targetScreen.x - service.rowW - service.slop) : 0
       readonly property int liveTop: showable
-        ? Math.round(info.at[1] - targetScreen.y - service.overhang) : 0
+        ? Math.round(info.at[1] - targetScreen.y - service.outside - service.slop) : 0
 
       // While the move button is dragging, the overlay must stop tracking the
       // window: it is the thing moving the window, and following it would feed
@@ -458,11 +458,11 @@ Item {
 
       Rectangle {
         id: row
-        // Right-aligned and top-aligned inside the window's corner, with the
-        // hit box's own overhang backed out so `inset` is measured from the
-        // real window edge.
-        x: parent.width - service.overhang - service.inset - width
-        y: service.overhang + service.inset
+        // Centred in the hit box, which is itself placed so the row's right
+        // edge meets the window's right edge and its vertical middle sits on
+        // the window's top edge.
+        x: service.slop
+        y: service.slop
         width: service.rowW
         height: service.rowH
         radius: Math.round(height / 3)

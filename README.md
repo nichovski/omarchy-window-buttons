@@ -165,12 +165,31 @@ Two related traps:
   first exits on the IPC request, leaving nothing running and no bar. Run
   `omarchy restart shell` once more to recover.
 
+## Placement
+
+The row straddles the window's **top edge**: half of its height rises above
+the edge and half sits inside the window, with its right edge lined up with
+the window's right edge.
+
+One consequence worth knowing: for a window near the top of a monitor, the
+upper half of the row is drawn over whatever is above it — usually the
+Omarchy bar, since this plugin sits on the overlay layer. Set `outside` to
+`0` in `Service.qml` to keep the row fully inside the window instead.
+
 ## Tuning
 
-Sizes are at the top of `Service.qml`: `btnSize`, `btnGap`, `rowPad`, `inset`
-(distance from the window corner) and `overhang` (hover slop). Colors follow
-the active theme via the `hyprland.active-border` token; close uses its own
-red, matching a Windows titlebar.
+Sizes are at the top of `Service.qml`:
+
+| Property | Meaning |
+|----------|---------|
+| `btnSize` | Width/height of one button |
+| `btnGap` | Space between buttons |
+| `rowPad` | Padding inside the row |
+| `outside` | How far the row rises above the window's top edge (defaults to half its height) |
+| `slop` | Hover margin on every side of the visible row |
+
+Colors follow the active theme via the `hyprland.active-border` token; close
+uses its own red, matching a Windows titlebar.
 
 ## Conflicts
 
