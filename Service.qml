@@ -33,6 +33,7 @@ Item {
     // Chromium / Electron
     "brave-browser", "chromium", "google-chrome*", "vivaldi*", "microsoft-edge*",
     "slack", "discord", "code", "codium", "obsidian", "spotify", "signal",
+    "mailspring",
     "notion*", "figma*", "postman",
     // Firefox family
     "firefox*", "zen*", "librewolf", "waterfox",
